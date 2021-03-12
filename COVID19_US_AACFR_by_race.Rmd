@@ -10,7 +10,9 @@ knitr::opts_chunk$set(echo=FALSE,
                       message=FALSE, 
                       comment = "", 
                       warning=FALSE, 
-                      results="hide") 
+                      results="hide",
+                      cache=TRUE,
+                      cache.lazy = FALSE) 
 knitr::opts_knit$set(root.dir = "C:/Users/YoonJoung Choi/Dropbox/0 Project/COVID19_US/")
 
 date<-as.Date(Sys.time(	), format='%d%b%Y')
@@ -24,11 +26,11 @@ suppressWarnings(suppressMessages(library(Matrix)))
 suppressWarnings(suppressMessages(library(stringr)))
 suppressWarnings(suppressMessages(library(stringi)))
 
-
 suppressWarnings(suppressMessages(library(rlist)))
 suppressWarnings(suppressMessages(library(zoo)))
 suppressWarnings(suppressMessages(library(RColorBrewer))) 
 suppressWarnings(suppressMessages(library(lubridate)))
+
 ```
 
 ###Updated results for a pre-print research note, _"Deaths among COVID Cases in the United States: Racial and Ethnic Disparities Persist"_
@@ -38,7 +40,8 @@ Madeleine Short Fabic, Yoonjoung Choi, David Bishai
 (Updated: `r time` EDT)  
 
 * The pre-print was published on November 17, 2020, and is available here: [https://www.medrxiv.org/content/10.1101/202011.15.20232066v2](https://www.medrxiv.org/content/10.1101/2020.11.15.20232066v2).   
-* Data source: [COVID-19 Case Surveillance Public Use Data](https://data.cdc.gov/Case-Surveillance/COVID-19-Case-Surveillance-Public-Use-Data/vbim-akqf) (version: December 4, 2020, release)    
+* Data source is: [CDC's COVID-19 Case Surveillance Public Use Data](https://data.cdc.gov/Case-Surveillance/COVID-19-Case-Surveillance-Public-Use-Data/vbim-akqf).     
+* The data are updated monthly. Pre-print used the November 3 release version, and this update is based on _the version released on February 24, 2021_.     
 
 ```{r dataPop}
 # https://www.census.gov/newsroom/press-kits/2020/population-estimates-detailed.html
@@ -143,14 +146,14 @@ dtasurveillance<-read.csv("C:/Users/YoonJoung Choi/Dropbox/0 Project/COVID19_US/
 ```{r dtacase}
 # CASE LEVEL data managment         
 dtacase<-dtasurveillance%>%
-    mutate_if(is.factor, as.character) %>% 
+    mutate_if(is.factor, as.character)%>% 
     mutate(
-        
-        cdc_report_dt=as.Date(cdc_report_dt),
-        week=as.numeric(
-            strftime(as.POSIXct(cdc_report_dt), format = "%V")),
-        month=as.numeric(
-            substr(as.character(as.Date(cdc_report_dt, format = "%m")), 6, 7)), 
+        month=as.numeric(substr(cdc_case_earliest_dt, 6, 7)), 
+        yearmonth =substr(cdc_case_earliest_dt, 1, 7), 
+        cdc_case_earliest_dt=as.POSIXct(as.Date(cdc_case_earliest_dt)),
+        week=as.numeric(strftime(cdc_case_earliest_dt, format = "%V"))
+    )%>%
+    mutate(        
         
         sextotal="Total",
         
@@ -159,22 +162,22 @@ dtacase<-dtasurveillance%>%
         age=as.numeric(sapply(strsplit(agegroup,"-"), `[`, 1)), #age interval begins
             age=ifelse(agegroup=="80+ Years", 80, age),
         
-        racegroup=race.and.ethnicity..combined., 
-        racegroup=ifelse(race.and.ethnicity..combined.=="White, Non-Hispanic",
+        racegroup=race_ethnicity_combined, 
+        racegroup=ifelse(race_ethnicity_combined=="White, Non-Hispanic",
                          "NH White", racegroup), 
-        racegroup=ifelse(race.and.ethnicity..combined.=="Black, Non-Hispanic",
+        racegroup=ifelse(race_ethnicity_combined=="Black, Non-Hispanic",
                          "NH Black", racegroup), 
-        racegroup=ifelse(race.and.ethnicity..combined.=="Asian, Non-Hispanic",
+        racegroup=ifelse(race_ethnicity_combined=="Asian, Non-Hispanic",
                          "NH Asian", racegroup), 
-        racegroup=ifelse(race.and.ethnicity..combined.=="American Indian/Alaska Native, Non-Hispanic",
+        racegroup=ifelse(race_ethnicity_combined=="American Indian/Alaska Native, Non-Hispanic",
                          "NH AIAN", racegroup), 
-        racegroup=ifelse(race.and.ethnicity..combined.=="Native Hawaiian/Other Pacific Islander, Non-Hispanic",
+        racegroup=ifelse(race_ethnicity_combined=="Native Hawaiian/Other Pacific Islander, Non-Hispanic",
                          "NH NHPI", racegroup), 
-        racegroup=ifelse(race.and.ethnicity..combined.=="Multiple/Other, Non-Hispanic",
+        racegroup=ifelse(race_ethnicity_combined=="Multiple/Other, Non-Hispanic",
                          "NH Multiple/Other", racegroup), 
-        racegroup=ifelse(race.and.ethnicity..combined.=="Hispanic/Latino",
+        racegroup=ifelse(race_ethnicity_combined=="Hispanic/Latino",
                          "Hispanic", racegroup),
-        racegroup=ifelse(is.na(race.and.ethnicity..combined.)==TRUE,
+        racegroup=ifelse(is.na(race_ethnicity_combined)==TRUE,
                          "Unknown", racegroup),
         
         raceagegroup=paste0(racegroup, "_",agegroup), 
@@ -190,37 +193,34 @@ dtacase<-dtasurveillance%>%
         hosp =as.numeric(hosp_yn=="Yes"), 
         
             death=ifelse(missingdeath==1, NA, death), 
-            hosp =ifelse(missinghosp ==1, NA, hosp)
+            hosp =ifelse(missinghosp ==1, NA, hosp),
         
-        )
+        raceagegroupmonth=paste0(racegroup,"_",agegroup,"_",yearmonth)
+        )%>%
+    arrange(racegroup, agegroup, yearmonth)
 
-colnames(dtacase)    
-str(dtacase)
-#summary(dtacase)
-
-#table(dtacase$raceagegroup)
 ```
 
 ```{r dtamonthly}
-# Weekly trend count data by RACE AND AGE
+# Monthly trend count data by RACE AND AGE
 dtamonthly<-dtacase%>%
-    arrange(racegroup, agegroup, month)%>%
-    mutate(raceagegroupmonth=paste0(racegroup,"_",agegroup,"_",as.character(month)))%>%
     group_by(raceagegroupmonth)%>%
-    summarise_at(vars(case, death, hosp, missingdeath, missinghosp), funs(sum), na.rm = TRUE)%>%
+    summarise_at(vars(case, death, hosp, missingdeath, missinghosp), 
+                 funs(sum), na.rm = TRUE)%>%
     ungroup()%>%
     mutate(
         racegroup=sapply(strsplit(raceagegroupmonth,"_"), `[`, 1),
         agegroup=sapply(strsplit(raceagegroupmonth,"_"), `[`, 2),
-        month=as.numeric(sapply(strsplit(raceagegroupmonth,"_"), `[`, 3)), 
+        yearmonth=sapply(strsplit(raceagegroupmonth,"_"), `[`, 3), 
+        year=as.numeric(sapply(strsplit(yearmonth,"/"), `[`, 1)), 
+        month=as.numeric(sapply(strsplit(yearmonth,"/"), `[`, 2)), 
         
         age=as.numeric(sapply(strsplit(agegroup,"-"), `[`, 1)), #age interval begins
             age=ifelse(agegroup=="80+ Years", 80, age), 
         
         raceagegroup=paste0(racegroup, "_", agegroup) 
         )%>%
-    arrange(racegroup, agegroup, month)
-    
+    arrange(racegroup, agegroup, year, month)
 
     #View(dtamonthly)
     #nrow(dtamonthly)
@@ -235,7 +235,7 @@ dim(dtamonthly)
 ```{r dtamonthly_standardization}
 dta<-dtamonthly%>%
     mutate(
-        releasedate="December 4, 2020", #"date of CDC public data release" , 
+        releasedate="February 24, 2021", #"date of CDC public data release" , 
         totalcases=sum(case), 
         totaldeaths=sum(death), 
         arscfr = 100*death/case 
@@ -247,9 +247,10 @@ dta<-dtamonthly%>%
     
 #	********** Age-adjusted CFR 
 #	*- ONLY March through september for November release  
-#	*- ONLY March through october for December release      
+#	*- ONLY March through october for December release   
+#	*- ONLY March through december for February 2021 release       
 #	*- ONLY among cases with both known race AND age => overall cases serves as standard    
-    filter(month>=3 & month<=9)%>%
+    filter((month>=3 & month<=12) & year==2020)%>%
     filter(agegroup!="Unknown" & racegroup!="Unknown" )%>%
     mutate(
         death_adj = standardcase * arscfr /100 #/*number of deaths, based on standard population & ARS-CFR*/
@@ -273,10 +274,14 @@ dta<-dtamonthly%>%
 
 ```{r dtasummary}
 dtamonthly_AARSCFR<-dta%>%
-    select(month, racegroup, ends_with("_observed"), ends_with("_std") )%>%
-    group_by(month, racegroup)%>%
+    select(yearmonth, racegroup, ends_with("_observed"), ends_with("_std") )%>%
+    group_by(yearmonth, racegroup)%>%
     summarize_all(funs(mean(., na.rm=TRUE)))%>%
-    ungroup()
+    ungroup()%>%
+    mutate(
+        year=as.numeric(sapply(strsplit(yearmonth,"/"), `[`, 1)), 
+        month=as.numeric(sapply(strsplit(yearmonth,"/"), `[`, 2))
+    )
 
 #dim(dtamonthly_AARSCFR)
 ```
@@ -301,7 +306,7 @@ dtafig<-dtamonthly_AARSCFR%>%
     gather(var, val, starts_with("cfr_") ) %>% 
     unite(var2, racegroup, var) %>% 
     spread(var2, val) %>%
-    ungroup() #THIS LINE IS CRITICAL, BUT I DON"T KNOW WHY"
+    ungroup()#THIS LINE IS CRITICAL, BUT I DON"T KNOW WHY"
 
 fig1<-dtafig%>%
     plot_ly(x = ~month, showlegend=FALSE)%>%
@@ -321,7 +326,7 @@ fig1<-dtafig%>%
         marker = list(color = "green"),
         line = list(color = "green") ) %>%
     add_trace(
-        y = ~NHWhite_cfr_observed,  name="NH Black",
+        y = ~NHWhite_cfr_observed,  name="NH White",
         mode = 'markers+lines', 
         marker = list(color = "black"),
         line = list(color = "black") ) %>%
@@ -334,8 +339,10 @@ fig1<-dtafig%>%
     layout(
         showlegend = FALSE,
         title = c(""),
-        xaxis=list(title="Month", range=c(2,10), showgrid = FALSE, 
-                    tickfont = list(size=10)), 
+        #xaxis=list(title="Month", range=c(2,10), showgrid = FALSE, 
+        #            tickfont = list(size=10)), 
+        xaxis=list(title="Month", showgrid = FALSE, 
+                   tickfont = list(size=10)), 
         yaxis=list(title="Case-fatality rate (%)", showgrid = FALSE) 
         )
 
@@ -357,7 +364,7 @@ fig2<-dtafig%>%
         marker = list(color = "green"),
         line = list(color = "green") ) %>%
     add_trace(
-        y = ~NHWhite_cfr_std,  name="NH Black",
+        y = ~NHWhite_cfr_std,  name="NH White",
         mode = 'markers+lines', 
         marker = list(color = "black"),
         line = list(color = "black") ) %>%
@@ -369,8 +376,10 @@ fig2<-dtafig%>%
         font = list(size = 12) ) %>%    
     layout(
         title = c(""),
-        xaxis=list(title="Month", range=c(2,10), showgrid = FALSE, 
-                    tickfont = list(size=10)), 
+        #xaxis=list(title="Month", range=c(2,11), showgrid = FALSE, 
+        #            tickfont = list(size=10)), 
+        xaxis=list(title="Month", showgrid = FALSE, 
+                   tickfont = list(size=10)), 
         yaxis=list(title="Case-fatality rate (%)", showgrid = FALSE) 
         )
 
@@ -426,7 +435,7 @@ panel <- . %>%
         marker = list(color = "green"),
         line = list(color = "green") ) %>%
     add_trace(
-        y = ~NHWhite_arscfr,  name="NH Black",
+        y = ~NHWhite_arscfr,  name="NH White",
         mode = 'markers+lines', 
         marker = list(color = "black"),
         line = list(color = "black") ) %>%
@@ -438,7 +447,7 @@ panel <- . %>%
     layout(
         showlegend=FALSE, 
         title = c(""),
-        xaxis=list(title="Month", range=c(2,10), showgrid = FALSE, 
+        xaxis=list(title="Month", showgrid = FALSE, 
                     tickfont = list(size=10)), 
         yaxis=list(title="Case-fatality rate (%) (log scale)", 
                    type="log", 
